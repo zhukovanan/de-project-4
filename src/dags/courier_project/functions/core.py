@@ -2,16 +2,23 @@ import requests
 import json
 import pandas as pd
 import psycopg2
-import sys
+import logging
 
-from airflow.exceptions import AirflowException
+from airflow.models import Connection
 from datetime import datetime
 
-API_KEY = '25c27781-8fde-4b30-a22e-524044a7580f'
-BASE_URL = 'https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net'
+#Для логирования
+task_logger = logging.getLogger('airflow.task')
+
+#Забираем параметры подключения к yandexcloud
+CONN_CLOUD = Connection.get_connection_from_secrets("CLOUD_CONNECTION_KEY")
+CONN_PG = Connection.get_connection_from_secrets("PG_WAREHOUSE_CONNECTION")
+
+API_KEY = CONN_CLOUD.password
+BASE_URL = CONN_CLOUD.host
 
 
-nickname = 'zhukov-an-an'
+nickname = CONN_CLOUD.login
 cohort = '1'
 headers = {
     'X-Nickname': nickname,
@@ -22,8 +29,8 @@ headers = {
 }
 
 
-
-def pg_connect(database='de', user='jovyan', password='jovyan', host='localhost', port= '5432'):
+#Клиент для подключеня к БД
+def pg_connect(database=CONN_PG.schema, user=CONN_PG.login, password=CONN_PG.password, host=CONN_PG.host, port = CONN_PG.port):
     try:
         server_conn = psycopg2.connect(
                     database=database, 
@@ -33,23 +40,23 @@ def pg_connect(database='de', user='jovyan', password='jovyan', host='localhost'
                     port= port
                     )
     except Exception as e:
-        print(f"Not managed to connect specified server: {str(e)}")
-    
+        task_logger.error(f"Not managed to connect specified server: {str(e)}")    
     else:
         return server_conn
 
 
-
+#Получаем информацию по разным типам структурных элементов данных
 def get_core_report(report_type, sort_field, sort_direction, **kwargs ):
 
-    print(f'Making request to get data on {report_type}')
+    task_logger.info(f'Making request to get data on {report_type}')
 
-
+    #Параметры запроса
     params = {'sort_field': sort_field,
               'sort_direction' : sort_direction,
               'limit': 50,
               'offset': 0}
 
+    #Если тип забираем данные по доставкам, необходимо скорректировать структуру параметров
     if report_type == 'deliveries':
         params = {'restaurant_id' : kwargs['restaurant_id'],
                        'from':kwargs['from_date'],
@@ -59,6 +66,7 @@ def get_core_report(report_type, sort_field, sort_direction, **kwargs ):
                        'limit': 50,
                        'offset': 0}
 
+        #Если включен параметр, то грузим все данные
         if kwargs['remove_params_flag'] == True:
             params.pop('restaurant_id', None)
             params.pop('from', None)
@@ -76,6 +84,9 @@ def get_core_report(report_type, sort_field, sort_direction, **kwargs ):
         response = json.loads(response.content)
 
         if not response:
+
+            task_logger.error(f'Not managed to load information on {report_type}')
+
             break
 
         data_lst.append(response)
@@ -85,13 +96,16 @@ def get_core_report(report_type, sort_field, sort_direction, **kwargs ):
         params.update({'offset' : offset})
 
         if len(response) < 50:
+
+            task_logger.info(f'Taken all information on {report_type}')
+
             break
     
 
     
     return  [x for y in data_lst for x in y]
 
-
+#Прогружаем данные в базу по ресторанам и курьерам
 def load_data_from_base(report_type, table, sort_field = '_id', sort_direction = 'asc', pg=pg_connect(), **context):
 
     load_time_id = context['execution_date']
@@ -113,7 +127,7 @@ def load_data_from_base(report_type, table, sort_field = '_id', sort_direction =
     de_conn.close()
 
 
-
+#Прогружаем данные в базу по доставкам
 def load_deliveries_to_base(sort_field = '_id', sort_direction = 'asc',pg=pg_connect(), remove_params_flag = True, **context):
 
     ds_date = context['ds']

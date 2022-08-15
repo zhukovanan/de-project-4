@@ -12,6 +12,7 @@ args = {
     'retries': 0
 }
 
+PG_DEFAULT = "PG_WAREHOUSE_CONNECTION"
 
 files = ['couriers', 'restaurants', 'deliveries']
 
@@ -31,7 +32,7 @@ with DAG(
 
     for file in files:
         sql_creation_mart.append(PostgresOperator(task_id=f'create_staging_{file}',
-        postgres_conn_id='PG_WAREHOUSE_CONNECTION',
+        postgres_conn_id=PG_DEFAULT,
         sql=f"sql/stg.{file}.sql"
     ))
 
@@ -41,7 +42,7 @@ with DAG(
         else:
             type_dds = 'dm'
         sql_creation_mart_dds.append(PostgresOperator(task_id=f'create_{type_dds}_{file}',
-        postgres_conn_id='PG_WAREHOUSE_CONNECTION',
+        postgres_conn_id=PG_DEFAULT,
         sql=f"sql/dds.{type_dds}_{file}_build.sql"
     ))
 
@@ -53,7 +54,7 @@ with DAG(
 
     for file in files[:-1]:
         sql_upload_dds_dm.append(PostgresOperator(task_id=f'upload_dds_dm_{file}',
-        postgres_conn_id='PG_WAREHOUSE_CONNECTION',
+        postgres_conn_id=PG_DEFAULT,
         sql=f"sql/dds.dm_{file}_upload.sql"))
 
 
@@ -62,12 +63,12 @@ with DAG(
         python_callable=load_deliveries_to_base)
 
     upload_dds_fct_deliveries = PostgresOperator(task_id=f'upload_dds_fct_deliveries',
-                                                 postgres_conn_id='PG_WAREHOUSE_CONNECTION',
+                                                 postgres_conn_id=PG_DEFAULT,
                                                 sql=f"sql/dds.fct_deliveries_upload.sql")
 
 
     upload_cdm_dm_courier_ledger = PostgresOperator(task_id=f'upload_cdm_dm_courier_ledger',
-                                                 postgres_conn_id='PG_WAREHOUSE_CONNECTION',
+                                                 postgres_conn_id=PG_DEFAULT,
                                                 sql=f"sql/cdm.dm_courier_ledger.sql")
 
     i = 0   # iterator
